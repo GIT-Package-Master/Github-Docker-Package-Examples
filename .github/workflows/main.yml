@@ -2,60 +2,50 @@ name: Docker
 
 on:
   push:
-    # Publish `master` as Docker `latest` i mage.
+    # Publish `main` as Docker `latest` image.
     branches:
       - main
 
-    paths:
-      - '.github/workflows/main.yml'
+    # Publish `v1.2.3` tags as releases.
+    tags:
+      - v*
 
   # Run tests for any PRs.
   pull_request:
 
 env:
-  IMAGE_NAME: docker_package_example_1.0
+  FEDORA_IMAGE_NAME: example_docker_package_1.0.0
+  DOTNET_IMAGE_NAME: example_container_docker_package_2.1.2
+  
 
 jobs:
-  # Run tests.
-  # See also https://docs.docker.com/docker-hub/builds/automated-testing/
-  test:
-    runs-on: ubuntu-latest
+  build_image:
+    strategy:
+      matrix: 
+        os: [ubuntu-latest]
+        dir: [TeXOnFedora, TeXOnDotNet]
+        
+    runs-on: ${{ matrix.os }}
+    
     permissions:
-      packages: write
       contents: read
+      packages: write
+    
     steps:
-      - uses: actions/checkout@v2
+      - uses: actions/checkout@v3
+        
+      - name: Log into registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
 
-      - name: Run tests
+      - name: Build ${{ matrix.dir }} and push image
         run: |
-          if [ -f docker-compose.test.yml ]; then
-            docker-compose --file docker-compose.test.yml build
-            docker-compose --file docker-compose.test.yml run sut
-          else
-            docker build app/ --file app/Dockerfile
-          fi
+          [ ${{ matrix.dir }} = "TeXOnFedora" ] && IMAGE_NAME='texlive-fedora' || IMAGE_NAME='texlive-dotnet'
+          echo "Image name is ${IMAGE_NAME}"
+          
+          cd ${{ matrix.dir }}
+          docker build . --file Dockerfile --tag ${IMAGE_NAME}
 
-  # Push image to GitHub Packages.
-  # See also https://docs.docker.com/docker-hub/builds/
-  push:
-    # Ensure test job passes before pushing image.
-    needs: test
-
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push'
-
-    steps:
-      - uses: actions/checkout@v2
-
-      - name: Build image
-        run: docker build app/ --file app/Dockerfile --tag $IMAGE_NAME
-
-      - name: Log into Github Packages
-        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
-
-      - name: Push image to Github Packages
-        run: |
-          IMAGE_ID=docker.pkg.github.com/${{ github.repository }}/$IMAGE_NAME
+          IMAGE_ID=ghcr.io/${{ github.repository }}/${IMAGE_NAME}
 
           # Change all uppercase to lowercase
           IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
@@ -67,37 +57,11 @@ jobs:
           [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
 
           # Use Docker `latest` tag convention
-          [ "$VERSION" == "master" ] && VERSION=latest
+          [ "$VERSION" == "main" ] && VERSION=latest
 
           echo IMAGE_ID=$IMAGE_ID
           echo VERSION=$VERSION
 
-          docker tag $IMAGE_NAME $IMAGE_ID:$VERSION
-          docker push $IMAGE_ID:$VERSION
-
-      - name: Log into Github Container Registry
-        run: |
-          # new login with new container registry url and PAT
-          echo ${{ secrets.CR_PAT }} | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
-
-      - name: Push image to Github Container Registry
-        run: |
-          IMAGE_ID=ghcr.io/${{ github.repository }}/$IMAGE_NAME
-
-          # Change all uppercase to lowercase
-          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
-
-          # Strip git ref prefix from version
-          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
-
-          # Strip "v" prefix from tag name
-          [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
-
-          # Use Docker `latest` tag convention
-          [ "$VERSION" == "master" ] && VERSION=latest
-
-          echo IMAGE_ID=$IMAGE_ID
-          echo VERSION=$VERSION
-
-          docker tag $IMAGE_NAME $IMAGE_ID:$VERSION
+          echo "docker tag ${IMAGE_NAME} $IMAGE_ID:$VERSION"
+          docker tag ${IMAGE_NAME} $IMAGE_ID:$VERSION
           docker push $IMAGE_ID:$VERSION
