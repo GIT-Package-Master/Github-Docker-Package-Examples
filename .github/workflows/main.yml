@@ -1,77 +1,106 @@
-name: Publish to Dockerhub and GitHub packages
+name: Docker
 
-on: push # [push, pull_request]
+on:
+  push:
+    # Publish `master` as Docker `latest` image.
+    branches:
+      - master
+
+    # Publish `v1.2.3` tags as releases.
+    tags:
+      - v*
+
+    paths:
+      - 'app/*'
+      - '.github/workflows/docker-publish.yml'
+
+  # Run tests for any PRs.
+  pull_request:
+
+env:
+  IMAGE_NAME: docker_package_example_1
 
 jobs:
+  # Run tests.
+  # See also https://docs.docker.com/docker-hub/builds/automated-testing/
   test:
-    runs-on: ubuntu-20.04
-    steps:
-    - uses: actions/checkout@v1
-    - name: tests the code
-      run: make test
+    runs-on: ubuntu-latest
 
-# https://docs.github.com/en/actions/reference/context-and-expression-syntax-for-github-actions#example-printing-context-information-to-the-log-file @ 2020 07 19      
-  push2dockerhub_if_linux:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [macOS-10.15, ubuntu-20.04]
-        goos: [linux, darwin]
-        exclude:
-          - os: macOS-10.15
-            goos: linux
-          - os: ubuntu-20.04
-            goos: darwin
-    runs-on: ${{ matrix.os }}
-    steps:
-    - uses: actions/checkout@v2
-    - name: builds the binary
-      run: CGO_ENABLED=0 GOOS=${{ matrix.goos }} go build -a -installsuffix cgo -ldflags '-w -extldflags "-static"' -o hello_world${{ matrix.os }}${{ matrix.goos }} .
-  
-    - uses: actions/checkout@master
-    - name: if linux build docker image and docker hub login as well as push
-      if: matrix.os == 'ubuntu-20.04'
-      env:
-        DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
-      run: |
-        # inspired by https://gist.github.com/jonico/e18127b487d198606e31aac669262af8 @ 2019 08 19
-        d=$(date +%Y-%m-%d)
-        tag=$d-${{ matrix.os }}-${{ github.sha }}
-        docker build -t lotharschulz/hello-github-actions:$tag .
-        echo ${DOCKER_PASSWORD} | docker login -u ${DOCKER_USERNAME} --password-stdin
-        docker push lotharschulz/hello-github-actions:$tag
-
-  push_to_docker_pkg:
-    name: build-push-action via docker cli
-    runs-on: ubuntu-20.04
     steps:
       - uses: actions/checkout@v2
-      - name: Build and Push
-        env:
-          DOCKER_USERNAME: ${{ github.actor }}
-          DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          echo ${DOCKER_PASSWORD} | docker login https://docker.pkg.github.com -u ${DOCKER_USERNAME} --password-stdin
-          d=$(date +%Y-%m-%d--%H-%M-%S--%N)
-          tag=$d-${{ github.sha }}
-          IMAGE_AND_TAG=docker.pkg.github.com/lotharschulz/hello-github-actions/hello-github-actions-pkg:$tag
-          docker build -t $IMAGE_AND_TAG .
-          docker push $IMAGE_AND_TAG
 
-  ghcr_push:
-    name: ghcr push
-    runs-on: ubuntu-20.04
+      - name: Run tests
+        run: |
+          if [ -f docker-compose.test.yml ]; then
+            docker-compose --file docker-compose.test.yml build
+            docker-compose --file docker-compose.test.yml run sut
+          else
+            docker build app/ --file app/Dockerfile
+          fi
+
+  # Push image to GitHub Packages.
+  # See also https://docs.docker.com/docker-hub/builds/
+  push:
+    # Ensure test job passes before pushing image.
+    needs: test
+
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push'
+
     steps:
       - uses: actions/checkout@v2
-      - name: Build and Push
-        env:
-          GCR_USERNAME: ${{ github.actor }}
-          GCR_PASSWORD: ${{ secrets.CR_PAT }}
+
+      - name: Build image
+        run: docker build app/ --file app/Dockerfile --tag $IMAGE_NAME
+
+      - name: Log into Github Packages
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login docker.pkg.github.com -u ${{ github.actor }} --password-stdin
+
+      - name: Push image to Github Packages
         run: |
-          echo "${GCR_PASSWORD}" | docker login https://ghcr.io -u ${GCR_USERNAME} --password-stdin
-          d=$(date +%Y-%m-%d--%H-%M-%S--%N)
-          tag=$d-${{ github.sha }}
-          IMAGE_AND_TAG=ghcr.io/lotharschulz/hello-github-actions/hello-github-actions-ghcr:$tag
-          docker build -t $IMAGE_AND_TAG .
-          docker push $IMAGE_AND_TAG
+          IMAGE_ID=docker.pkg.github.com/${{ github.repository }}/$IMAGE_NAME
+
+          # Change all uppercase to lowercase
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+
+          # Strip git ref prefix from version
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+
+          # Strip "v" prefix from tag name
+          [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
+
+          # Use Docker `latest` tag convention
+          [ "$VERSION" == "master" ] && VERSION=latest
+
+          echo IMAGE_ID=$IMAGE_ID
+          echo VERSION=$VERSION
+
+          docker tag $IMAGE_NAME $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:$VERSION
+
+      - name: Log into Github Container Registry
+        run: |
+          # new login with new container registry url and PAT
+          echo ${{ secrets.CR_PAT }} | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
+
+      - name: Push image to Github Container Registry
+        run: |
+          IMAGE_ID=ghcr.io/${{ github.repository }}/$IMAGE_NAME
+
+          # Change all uppercase to lowercase
+          IMAGE_ID=$(echo $IMAGE_ID | tr '[A-Z]' '[a-z]')
+
+          # Strip git ref prefix from version
+          VERSION=$(echo "${{ github.ref }}" | sed -e 's,.*/\(.*\),\1,')
+
+          # Strip "v" prefix from tag name
+          [[ "${{ github.ref }}" == "refs/tags/"* ]] && VERSION=$(echo $VERSION | sed -e 's/^v//')
+
+          # Use Docker `latest` tag convention
+          [ "$VERSION" == "master" ] && VERSION=latest
+
+          echo IMAGE_ID=$IMAGE_ID
+          echo VERSION=$VERSION
+
+          docker tag $IMAGE_NAME $IMAGE_ID:$VERSION
+          docker push $IMAGE_ID:$VERSION
