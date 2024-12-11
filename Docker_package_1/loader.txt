@@ -1,0 +1,8 @@
+load{
+  en.java vers.version=>2.1
+  en.java opti.version=>2.1
+  en.java prop.version=>2.1
+  en.java hair.version=>2.1
+  en.java pakg.version=>2.1
+  en.java choco.version=>2.1
+}
