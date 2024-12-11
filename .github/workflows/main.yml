@@ -20,7 +20,9 @@ jobs:
   # See also https://docs.docker.com/docker-hub/builds/automated-testing/
   test:
     runs-on: ubuntu-latest
-
+    permissions:
+      packages: write
+      contents: read
     steps:
       - uses: actions/checkout@v2
 
