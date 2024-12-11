@@ -7,7 +7,6 @@ on:
       - main
 
     paths:
-      - 'app/*'
       - '.github/workflows/main.yml'
 
   # Run tests for any PRs.
