@@ -23,7 +23,7 @@ jobs:
     strategy:
       matrix: 
         os: [ubuntu-latest]
-        dir: [TeXOnFedora, TeXOnDotNet]
+        dir: [Docker_package_1, Docker_package_2]
         
     runs-on: ${{ matrix.os }}
     
@@ -39,7 +39,7 @@ jobs:
 
       - name: Build ${{ matrix.dir }} and push image
         run: |
-          [ ${{ matrix.dir }} = "TeXOnFedora" ] && IMAGE_NAME='texlive-fedora' || IMAGE_NAME='texlive-dotnet'
+          [ ${{ matrix.dir }} = "Docker_package_1" ] && IMAGE_NAME='example_docker_package_1.0.0' || IMAGE_NAME='example_container_docker_package_2.1.2'
           echo "Image name is ${IMAGE_NAME}"
           
           cd ${{ matrix.dir }}
