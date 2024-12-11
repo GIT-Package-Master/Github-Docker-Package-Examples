@@ -8,7 +8,7 @@ on:
 
     paths:
       - 'app/*'
-      - '.github/workflows/docker-publish.yml'
+      - '.github/workflows/main.yml'
 
   # Run tests for any PRs.
   pull_request:
